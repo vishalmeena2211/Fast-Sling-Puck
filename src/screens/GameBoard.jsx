@@ -20,6 +20,13 @@ const GameBoard = () => {
     const canvasWidth = 400;
     const canvasHeight = 500;
 
+    const initialControlPoint = { x: canvasWidth / 2, y: canvasHeight - 100, vy: 0 };
+    const [controlPoint, setControlPoint] = useState(initialControlPoint);
+
+    const lineRestY = canvasHeight - 50;
+    const lineSpringConstant = 0.05;
+    const lineDamping = 0.95;
+
     useEffect(() => {
         const canvas = canvasRef.current;
         const ctx = canvas.getContext('2d');
@@ -53,9 +60,32 @@ const GameBoard = () => {
             });
         };
 
+        const drawElasticCurve = () => {
+            ctx.strokeStyle = '#FF0000';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.moveTo(0, lineRestY);
+            ctx.quadraticCurveTo(
+                controlPoint.x,
+                controlPoint.y,
+                canvasWidth,
+                lineRestY
+            );
+            ctx.stroke();
+        };
+
         drawBoard();
         drawDisks();
-    }, [disks]);
+        drawElasticCurve();
+    }, [disks, controlPoint]);
+
+    const getTouchPos = (canvas, touch) => {
+        const rect = canvas.getBoundingClientRect();
+        return {
+            x: touch.clientX - rect.left,
+            y: touch.clientY - rect.top,
+        };
+    };
 
     const getMousePos = (canvas, evt) => {
         const rect = canvas.getBoundingClientRect();
@@ -88,6 +118,29 @@ const GameBoard = () => {
         setDragging(null);
     };
 
+    const handleTouchStart = (e) => {
+        const pos = getTouchPos(canvasRef.current, e.touches[0]);
+        const clickedDisk = disks.findIndex(
+            (disk) => Math.hypot(disk.x - pos.x, disk.y - pos.y) < diskRadius
+        );
+        if (clickedDisk !== -1) setDragging(clickedDisk);
+    };
+
+    const handleTouchMove = (e) => {
+        if (dragging !== null) {
+            const pos = getTouchPos(canvasRef.current, e.touches[0]);
+            setDisks((prevDisks) =>
+                prevDisks.map((disk, index) =>
+                    index === dragging ? { ...disk, x: pos.x, y: pos.y } : disk
+                )
+            );
+        }
+    };
+
+    const handleTouchEnd = () => {
+        setDragging(null);
+    };
+
     const updatePositions = () => {
         setDisks((prevDisks) =>
             prevDisks.map((disk, index) => {
@@ -112,6 +165,18 @@ const GameBoard = () => {
                     Math.abs(x - canvasWidth / 2) > centerCircleRadius
                 ) {
                     vy = -vy;
+                }
+
+                // Check collision with elastic curve
+                if (y + diskRadius >= controlPoint.y) {
+                    const displacement = y + diskRadius - controlPoint.y;
+                    const springForce = displacement * lineSpringConstant;
+                    setControlPoint((prev) => ({
+                        ...prev,
+                        vy: prev.vy + springForce, // Apply spring force to the control point
+                    }));
+                    vy = -springForce; // Apply the opposite force to the disk
+                    y = controlPoint.y - diskRadius; // Move the disk to the top of the line
                 }
 
                 // Update position
@@ -144,6 +209,14 @@ const GameBoard = () => {
                 return { ...disk, x, y, vx, vy };
             })
         );
+
+        // Update the position of the control point
+        setControlPoint((prev) => {
+            const newY = prev.y + prev.vy;
+            const springForce = (lineRestY - newY) * lineSpringConstant;
+            const newVy = (prev.vy + springForce) * lineDamping;
+            return { ...prev, y: newY, vy: newVy };
+        });
     };
 
     useEffect(() => {
@@ -161,6 +234,9 @@ const GameBoard = () => {
                 onMouseDown={handleMouseDown}
                 onMouseMove={handleMouseMove}
                 onMouseUp={handleMouseUp}
+                onTouchStart={handleTouchStart}
+                onTouchMove={handleTouchMove}
+                onTouchEnd={handleTouchEnd}
             ></canvas>
         </div>
     );
